@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"nofx/logger"
 	"strconv"
 
@@ -100,15 +101,18 @@ func (t *LighterTraderV2) GetOrderStatus(symbol string, orderID string) (map[str
 		return nil, fmt.Errorf("invalid auth token: %w", err)
 	}
 
-	// Build request URL
-	endpoint := fmt.Sprintf("%s/api/v1/order/%s", t.baseURL, orderID)
+	// URL encode auth token (contains colons that need encoding)
+	// Authentication: Use "auth" query parameter (not Authorization header)
+	encodedAuth := url.QueryEscape(t.authToken)
+
+	// Build request URL with auth query parameter
+	endpoint := fmt.Sprintf("%s/api/v1/order/%s?auth=%s", t.baseURL, orderID, encodedAuth)
 
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Authorization", t.authToken)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := t.client.Do(req)
@@ -210,11 +214,15 @@ func (t *LighterTraderV2) GetActiveOrders(symbol string) ([]OrderResponse, error
 		return nil, fmt.Errorf("failed to get market index: %w", err)
 	}
 
-	// Build request URL
-	endpoint := fmt.Sprintf("%s/api/v1/accountActiveOrders?account_index=%d&market_id=%d",
-		t.baseURL, t.accountIndex, marketIndex)
+	// URL encode auth token (contains colons that need encoding)
+	// Authentication: Use "auth" query parameter (not Authorization header)
+	encodedAuth := url.QueryEscape(t.authToken)
 
-	logger.Debugf("📋 LIGHTER GetActiveOrders: endpoint=%s", endpoint)
+	// Build request URL with auth query parameter
+	endpoint := fmt.Sprintf("%s/api/v1/accountActiveOrders?account_index=%d&market_id=%d&auth=%s",
+		t.baseURL, t.accountIndex, marketIndex, encodedAuth)
+
+	logger.Debugf("📋 LIGHTER GetActiveOrders: endpoint=%s", endpoint[:min(len(endpoint), 120)]+"...")
 
 	// Send GET request
 	req, err := http.NewRequest("GET", endpoint, nil)
@@ -222,8 +230,6 @@ func (t *LighterTraderV2) GetActiveOrders(symbol string) ([]OrderResponse, error
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Add authentication header
-	req.Header.Set("Authorization", t.authToken)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := t.client.Do(req)
