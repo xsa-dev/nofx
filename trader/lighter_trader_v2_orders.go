@@ -214,6 +214,8 @@ func (t *LighterTraderV2) GetActiveOrders(symbol string) ([]OrderResponse, error
 	endpoint := fmt.Sprintf("%s/api/v1/accountActiveOrders?account_index=%d&market_id=%d",
 		t.baseURL, t.accountIndex, marketIndex)
 
+	logger.Infof("📋 LIGHTER GetActiveOrders: endpoint=%s", endpoint)
+
 	// Send GET request
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
@@ -234,6 +236,8 @@ func (t *LighterTraderV2) GetActiveOrders(symbol string) ([]OrderResponse, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
+
+	logger.Infof("📋 LIGHTER GetActiveOrders raw response: %s", string(body))
 
 	// Parse response
 	var apiResp struct {
