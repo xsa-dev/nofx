@@ -622,6 +622,9 @@ func (at *AutoTrader) syncGridState() {
 	}
 
 	logger.Debugf("[Grid] Synced state: position=%.4f, orders=%d", totalPosition, len(openOrders))
+
+	// CRITICAL: Check stop loss for filled levels
+	at.checkAndExecuteStopLoss()
 }
 
 // saveGridDecisionRecord saves the grid decision to database
@@ -680,4 +683,62 @@ func (at *AutoTrader) IsGridStrategy() bool {
 		return false
 	}
 	return at.config.StrategyConfig.StrategyType == "grid_trading" && at.config.StrategyConfig.GridConfig != nil
+}
+
+// checkAndExecuteStopLoss checks if any filled level has exceeded stop loss and closes it
+func (at *AutoTrader) checkAndExecuteStopLoss() {
+	gridConfig := at.config.StrategyConfig.GridConfig
+	if gridConfig.StopLossPct <= 0 {
+		return // Stop loss not configured
+	}
+
+	currentPrice, err := at.trader.GetMarketPrice(gridConfig.Symbol)
+	if err != nil {
+		logger.Warnf("[Grid] Failed to get market price for stop loss check: %v", err)
+		return
+	}
+
+	at.gridState.mu.Lock()
+	defer at.gridState.mu.Unlock()
+
+	for i := range at.gridState.Levels {
+		level := &at.gridState.Levels[i]
+		if level.State != "filled" || level.PositionEntry <= 0 {
+			continue
+		}
+
+		// Calculate loss percentage
+		var lossPct float64
+		if level.Side == "buy" {
+			// Long position: loss when price drops
+			lossPct = (level.PositionEntry - currentPrice) / level.PositionEntry * 100
+		} else {
+			// Short position: loss when price rises
+			lossPct = (currentPrice - level.PositionEntry) / level.PositionEntry * 100
+		}
+
+		// Check if stop loss triggered
+		if lossPct >= gridConfig.StopLossPct {
+			logger.Warnf("[Grid] STOP LOSS TRIGGERED: Level %d, entry=$%.2f, current=$%.2f, loss=%.2f%%",
+				i, level.PositionEntry, currentPrice, lossPct)
+
+			// Close the position
+			var closeErr error
+			if level.Side == "buy" {
+				_, closeErr = at.trader.CloseLong(gridConfig.Symbol, level.PositionSize)
+			} else {
+				_, closeErr = at.trader.CloseShort(gridConfig.Symbol, level.PositionSize)
+			}
+
+			if closeErr != nil {
+				logger.Errorf("[Grid] Failed to execute stop loss for level %d: %v", i, closeErr)
+			} else {
+				level.State = "stopped"
+				level.UnrealizedPnL = -lossPct * level.AllocatedUSD / 100
+				at.gridState.TotalTrades++
+				logger.Infof("[Grid] Stop loss executed: Level %d closed at $%.2f (loss %.2f%%)",
+					i, currentPrice, lossPct)
+			}
+		}
+	}
 }
