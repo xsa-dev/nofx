@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"fmt"
 	"nofx/logger"
 	"time"
 )
@@ -206,8 +207,20 @@ func (a *GridTraderAdapter) PlaceLimitOrder(req *LimitOrderRequest) (*LimitOrder
 
 // CancelOrder cancels a specific order
 func (a *GridTraderAdapter) CancelOrder(symbol, orderID string) error {
-	// Fallback: cancel all orders for the symbol
-	return a.Trader.CancelAllOrders(symbol)
+	// Try to use CancelOrder if trader supports it directly
+	if canceler, ok := a.Trader.(interface {
+		CancelOrder(symbol, orderID string) error
+	}); ok {
+		return canceler.CancelOrder(symbol, orderID)
+	}
+
+	// For traders that only support CancelAllOrders, log a warning
+	// This is a limitation - we cannot cancel individual orders
+	logger.Warnf("[Grid] Trader does not support individual order cancellation, "+
+		"cannot cancel order %s. Consider using exchange-specific GridTrader implementation.", orderID)
+
+	// Return error instead of canceling all orders
+	return fmt.Errorf("individual order cancellation not supported for this exchange")
 }
 
 // GetOrderBook returns empty order book (not supported in basic Trader)
