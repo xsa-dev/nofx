@@ -814,7 +814,9 @@ func (at *AutoTrader) syncGridState() {
 	// Get current positions to verify fills
 	positions, err := at.trader.GetPositions()
 	currentPositionSize := 0.0
-	if err == nil {
+	if err != nil {
+		logger.Warnf("[Grid] Failed to get positions for state sync: %v", err)
+	} else {
 		for _, pos := range positions {
 			if sym, ok := pos["symbol"].(string); ok && sym == gridConfig.Symbol {
 				if size, ok := pos["positionAmt"].(float64); ok {
@@ -826,10 +828,10 @@ func (at *AutoTrader) syncGridState() {
 
 	// Update levels based on order status
 	at.gridState.mu.Lock()
-	previousFilledCount := 0
+	expectedPositionSize := 0.0
 	for _, level := range at.gridState.Levels {
 		if level.State == "filled" {
-			previousFilledCount++
+			expectedPositionSize += level.PositionSize
 		}
 	}
 
@@ -839,7 +841,8 @@ func (at *AutoTrader) syncGridState() {
 			if !activeOrderIDs[level.OrderID] {
 				// Order no longer exists - check if position changed to determine fill vs cancel
 				// This is a heuristic - ideally we'd query order history
-				if math.Abs(currentPositionSize) > math.Abs(float64(previousFilledCount)*level.OrderQuantity) {
+				// If current position is larger than expected filled positions, this order was likely filled
+				if math.Abs(currentPositionSize) > math.Abs(expectedPositionSize) {
 					// Position increased, likely filled
 					level.State = "filled"
 					level.PositionEntry = level.Price
