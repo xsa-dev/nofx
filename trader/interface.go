@@ -1,6 +1,9 @@
 package trader
 
-import "time"
+import (
+	"nofx/logger"
+	"time"
+)
 
 // ClosedPnLRecord represents a single closed position record from exchange
 type ClosedPnLRecord struct {
@@ -169,6 +172,14 @@ func NewGridTraderAdapter(t Trader) *GridTraderAdapter {
 // PlaceLimitOrder implements limit order using available methods
 // For exchanges without native limit order support, this uses conditional orders
 func (a *GridTraderAdapter) PlaceLimitOrder(req *LimitOrderRequest) (*LimitOrderResult, error) {
+	// CRITICAL FIX: Set leverage before placing order
+	if req.Leverage > 0 {
+		if err := a.Trader.SetLeverage(req.Symbol, req.Leverage); err != nil {
+			logger.Warnf("[Grid] Failed to set leverage %dx: %v", req.Leverage, err)
+			// Continue anyway - some exchanges don't require explicit leverage setting
+		}
+	}
+
 	// Use SetStopLoss/SetTakeProfit as conditional limit orders
 	// For buy orders below current price, use stop-loss mechanism
 	// For sell orders above current price, use take-profit mechanism

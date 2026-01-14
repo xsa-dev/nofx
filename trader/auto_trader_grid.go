@@ -99,6 +99,15 @@ func (at *AutoTrader) InitializeGrid() error {
 	at.initializeGridLevels(price, gridConfig)
 
 	at.gridState.IsInitialized = true
+
+	// CRITICAL: Set leverage on exchange before trading
+	if err := at.trader.SetLeverage(gridConfig.Symbol, gridConfig.Leverage); err != nil {
+		logger.Warnf("[Grid] Failed to set leverage %dx on exchange: %v", gridConfig.Leverage, err)
+		// Not fatal - continue with default leverage
+	} else {
+		logger.Infof("[Grid] Leverage set to %dx for %s", gridConfig.Leverage, gridConfig.Symbol)
+	}
+
 	logger.Infof("📊 [Grid] Initialized: %d levels, $%.2f - $%.2f, spacing $%.2f",
 		gridConfig.GridCount, at.gridState.LowerPrice, at.gridState.UpperPrice, at.gridState.GridSpacing)
 
@@ -332,11 +341,55 @@ func (at *AutoTrader) placeGridLimitOrder(d *kernel.Decision, side string) error
 
 	gridConfig := at.config.StrategyConfig.GridConfig
 
+	// CRITICAL: Validate and cap quantity to prevent excessive position sizes
+	// This protects against AI miscalculations or leverage misconfigurations
+	quantity := d.Quantity
+	if d.Price > 0 && gridConfig.TotalInvestment > 0 {
+		// Calculate max allowed position value per grid level
+		// Each level gets proportional share of total investment
+		maxMarginPerLevel := gridConfig.TotalInvestment / float64(gridConfig.GridCount)
+		maxPositionValuePerLevel := maxMarginPerLevel * float64(gridConfig.Leverage)
+		maxQuantityPerLevel := maxPositionValuePerLevel / d.Price
+
+		// Also get the level's allocated USD for additional validation
+		at.gridState.mu.RLock()
+		var levelAllocatedUSD float64
+		if d.LevelIndex >= 0 && d.LevelIndex < len(at.gridState.Levels) {
+			levelAllocatedUSD = at.gridState.Levels[d.LevelIndex].AllocatedUSD
+		}
+		at.gridState.mu.RUnlock()
+
+		// Use level-specific allocation if available
+		if levelAllocatedUSD > 0 {
+			levelMaxPositionValue := levelAllocatedUSD * float64(gridConfig.Leverage)
+			levelMaxQuantity := levelMaxPositionValue / d.Price
+			if levelMaxQuantity < maxQuantityPerLevel {
+				maxQuantityPerLevel = levelMaxQuantity
+			}
+		}
+
+		// Cap quantity if it exceeds the maximum allowed
+		if quantity > maxQuantityPerLevel {
+			logger.Warnf("[Grid] ⚠️ Quantity %.4f exceeds max allowed %.4f (position_value $%.2f > max $%.2f), capping",
+				quantity, maxQuantityPerLevel, quantity*d.Price, maxPositionValuePerLevel)
+			quantity = maxQuantityPerLevel
+		}
+
+		// Safety check: ensure position value is reasonable (within 2x of intended max as absolute limit)
+		positionValue := quantity * d.Price
+		absoluteMaxValue := gridConfig.TotalInvestment * float64(gridConfig.Leverage) * 2 // 2x safety margin
+		if positionValue > absoluteMaxValue {
+			logger.Errorf("[Grid] 🚫 CRITICAL: Position value $%.2f exceeds absolute max $%.2f! Rejecting order.",
+				positionValue, absoluteMaxValue)
+			return fmt.Errorf("position value $%.2f exceeds safety limit $%.2f", positionValue, absoluteMaxValue)
+		}
+	}
+
 	req := &LimitOrderRequest{
 		Symbol:     d.Symbol,
 		Side:       side,
 		Price:      d.Price,
-		Quantity:   d.Quantity,
+		Quantity:   quantity, // Use validated/capped quantity
 		Leverage:   gridConfig.Leverage,
 		PostOnly:   gridConfig.UseMakerOnly,
 		ReduceOnly: false,
