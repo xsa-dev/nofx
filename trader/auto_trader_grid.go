@@ -104,6 +104,93 @@ func (at *AutoTrader) checkBreakout() (BreakoutType, float64) {
 	return BreakoutNone, 0
 }
 
+// checkMaxDrawdown checks if current drawdown exceeds maximum allowed
+// Returns: (exceeded bool, currentDrawdown float64)
+func (at *AutoTrader) checkMaxDrawdown() (bool, float64) {
+	gridConfig := at.config.StrategyConfig.GridConfig
+	if gridConfig.MaxDrawdownPct <= 0 {
+		return false, 0
+	}
+
+	// Get current equity
+	balance, err := at.trader.GetBalance()
+	if err != nil {
+		return false, 0
+	}
+
+	currentEquity := 0.0
+	if equity, ok := balance["total_equity"].(float64); ok {
+		currentEquity = equity
+	} else if total, ok := balance["totalWalletBalance"].(float64); ok {
+		if unrealized, ok := balance["totalUnrealizedProfit"].(float64); ok {
+			currentEquity = total + unrealized
+		}
+	}
+
+	if currentEquity <= 0 {
+		return false, 0
+	}
+
+	// Update peak equity
+	at.gridState.mu.Lock()
+	if currentEquity > at.gridState.PeakEquity {
+		at.gridState.PeakEquity = currentEquity
+	}
+	peakEquity := at.gridState.PeakEquity
+	at.gridState.mu.Unlock()
+
+	if peakEquity <= 0 {
+		return false, 0
+	}
+
+	// Calculate current drawdown
+	drawdown := (peakEquity - currentEquity) / peakEquity * 100
+
+	// Update max drawdown tracking
+	at.gridState.mu.Lock()
+	if drawdown > at.gridState.MaxDrawdown {
+		at.gridState.MaxDrawdown = drawdown
+	}
+	at.gridState.mu.Unlock()
+
+	return drawdown >= gridConfig.MaxDrawdownPct, drawdown
+}
+
+// emergencyExit closes all positions and cancels all orders
+func (at *AutoTrader) emergencyExit(reason string) error {
+	gridConfig := at.config.StrategyConfig.GridConfig
+
+	logger.Errorf("[Grid] EMERGENCY EXIT: %s", reason)
+
+	// Cancel all orders
+	if err := at.cancelAllGridOrders(); err != nil {
+		logger.Errorf("[Grid] Failed to cancel orders in emergency: %v", err)
+	}
+
+	// Close all positions
+	positions, err := at.trader.GetPositions()
+	if err == nil {
+		for _, pos := range positions {
+			if sym, ok := pos["symbol"].(string); ok && sym == gridConfig.Symbol {
+				if size, ok := pos["positionAmt"].(float64); ok && size != 0 {
+					if size > 0 {
+						at.trader.CloseLong(gridConfig.Symbol, size)
+					} else {
+						at.trader.CloseShort(gridConfig.Symbol, -size)
+					}
+				}
+			}
+		}
+	}
+
+	// Pause grid
+	at.gridState.mu.Lock()
+	at.gridState.IsPaused = true
+	at.gridState.mu.Unlock()
+
+	return nil
+}
+
 // handleBreakout handles price breakout from grid range
 func (at *AutoTrader) handleBreakout(breakoutType BreakoutType, breakoutPct float64) error {
 	logger.Warnf("[Grid] BREAKOUT DETECTED: %s, %.2f%% beyond boundary", breakoutType, breakoutPct)
@@ -281,6 +368,12 @@ func (at *AutoTrader) RunGridCycle() error {
 		if err := at.handleBreakout(breakoutType, breakoutPct); err != nil {
 			return err // Grid paused due to breakout
 		}
+	}
+
+	// CRITICAL: Check max drawdown
+	exceeded, drawdown := at.checkMaxDrawdown()
+	if exceeded {
+		return at.emergencyExit(fmt.Sprintf("max drawdown exceeded: %.2f%%", drawdown))
 	}
 
 	// Check if grid is paused
