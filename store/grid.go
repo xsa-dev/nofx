@@ -39,6 +39,23 @@ type GridConfigModel struct {
 	MinRangingScore      int  `json:"min_ranging_score" gorm:"default:60"`
 	TrendResumeThreshold int  `json:"trend_resume_threshold" gorm:"default:70"`
 
+	// Box indicator periods (1h candles)
+	ShortBoxPeriod int `json:"short_box_period" gorm:"default:72"`  // 3 days
+	MidBoxPeriod   int `json:"mid_box_period" gorm:"default:240"`   // 10 days
+	LongBoxPeriod  int `json:"long_box_period" gorm:"default:500"`  // 21 days
+
+	// Effective leverage limits by regime level
+	NarrowRegimeLeverage   int `json:"narrow_regime_leverage" gorm:"default:2"`
+	StandardRegimeLeverage int `json:"standard_regime_leverage" gorm:"default:4"`
+	WideRegimeLeverage     int `json:"wide_regime_leverage" gorm:"default:3"`
+	VolatileRegimeLeverage int `json:"volatile_regime_leverage" gorm:"default:2"`
+
+	// Position limits by regime level (percentage of total investment)
+	NarrowRegimePositionPct   float64 `json:"narrow_regime_position_pct" gorm:"default:40"`
+	StandardRegimePositionPct float64 `json:"standard_regime_position_pct" gorm:"default:70"`
+	WideRegimePositionPct     float64 `json:"wide_regime_position_pct" gorm:"default:60"`
+	VolatileRegimePositionPct float64 `json:"volatile_regime_position_pct" gorm:"default:40"`
+
 	OrderRefreshSec  int     `json:"order_refresh_sec" gorm:"default:300"`
 	UseMakerOnly     bool    `json:"use_maker_only" gorm:"default:true"`
 	SlippageTolerPct float64 `json:"slippage_toler_pct" gorm:"default:0.1"`
@@ -70,6 +87,26 @@ type GridInstanceModel struct {
 	RegimeScore         int     `json:"regime_score"`
 	LastRegimeCheck     time.Time `json:"last_regime_check"`
 	ConsecutiveTrending int     `json:"consecutive_trending"`
+
+	// Current regime level (narrow/standard/wide/volatile/trending)
+	CurrentRegimeLevel string `json:"current_regime_level" gorm:"default:standard"`
+
+	// Box state
+	ShortBoxUpper float64 `json:"short_box_upper"`
+	ShortBoxLower float64 `json:"short_box_lower"`
+	MidBoxUpper   float64 `json:"mid_box_upper"`
+	MidBoxLower   float64 `json:"mid_box_lower"`
+	LongBoxUpper  float64 `json:"long_box_upper"`
+	LongBoxLower  float64 `json:"long_box_lower"`
+
+	// Breakout state
+	BreakoutLevel        string    `json:"breakout_level" gorm:"default:none"` // none/short/mid/long
+	BreakoutDirection    string    `json:"breakout_direction"`                 // up/down
+	BreakoutConfirmCount int       `json:"breakout_confirm_count" gorm:"default:0"`
+	BreakoutStartTime    time.Time `json:"breakout_start_time"`
+
+	// Position adjustment due to breakout
+	PositionReductionPct float64 `json:"position_reduction_pct" gorm:"default:0"` // 0 = normal, 50 = reduced
 
 	TotalProfit     float64   `json:"total_profit" gorm:"default:0"`
 	TotalFees       float64   `json:"total_fees" gorm:"default:0"`
