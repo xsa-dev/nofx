@@ -17,11 +17,8 @@ import (
 // getTestConfig returns test configuration from environment variables
 func getTestConfig() (walletAddr, apiKey string, apiKeyIndex int) {
 	walletAddr = os.Getenv("LIGHTER_WALLET")
-	if walletAddr == "" {
-		walletAddr = "0x88d72c1f2f54dfba7ad6abc56efe70d00a9c8330" // Default test wallet
-	}
 	apiKey = os.Getenv("LIGHTER_API_KEY")
-	// API key must be provided via environment variable for security
+	// All credentials must be provided via environment variables for security
 	apiKeyIndex = 2 // Default to index 2 (more stable than index 0)
 	if idx := os.Getenv("LIGHTER_API_KEY_INDEX"); idx != "" {
 		fmt.Sscanf(idx, "%d", &apiKeyIndex)
@@ -32,6 +29,9 @@ func getTestConfig() (walletAddr, apiKey string, apiKeyIndex int) {
 func skipIfNoEnv(t *testing.T) {
 	if os.Getenv("LIGHTER_TEST") != "1" {
 		t.Skip("Skipping Lighter integration test. Set LIGHTER_TEST=1 to run")
+	}
+	if os.Getenv("LIGHTER_WALLET") == "" {
+		t.Skip("Skipping: LIGHTER_WALLET environment variable not set")
 	}
 	if os.Getenv("LIGHTER_API_KEY") == "" {
 		t.Skip("Skipping: LIGHTER_API_KEY environment variable not set")
