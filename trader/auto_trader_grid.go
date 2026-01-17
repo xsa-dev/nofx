@@ -46,6 +46,25 @@ type GridState struct {
 
 	// Order tracking
 	OrderBook map[string]int // OrderID -> LevelIndex
+
+	// Box state
+	ShortBoxUpper float64
+	ShortBoxLower float64
+	MidBoxUpper   float64
+	MidBoxLower   float64
+	LongBoxUpper  float64
+	LongBoxLower  float64
+
+	// Breakout state
+	BreakoutLevel        string
+	BreakoutDirection    string
+	BreakoutConfirmCount int
+
+	// Position reduction (0 = normal, 50 = reduced after false breakout)
+	PositionReductionPct float64
+
+	// Current regime level
+	CurrentRegimeLevel string
 }
 
 // NewGridState creates a new grid state
@@ -257,6 +276,169 @@ func (at *AutoTrader) handleBreakout(breakoutType BreakoutType, breakoutPct floa
 	return nil
 }
 
+// checkBoxBreakout checks for multi-period box breakouts and takes appropriate action
+func (at *AutoTrader) checkBoxBreakout() error {
+	gridConfig := at.config.StrategyConfig.GridConfig
+	if gridConfig == nil {
+		return nil
+	}
+
+	// Get box data
+	box, err := market.GetBoxData(gridConfig.Symbol)
+	if err != nil {
+		logger.Infof("Failed to get box data: %v", err)
+		return nil // Non-fatal, continue with other checks
+	}
+
+	// Update grid state with box values
+	at.gridState.mu.Lock()
+	at.gridState.ShortBoxUpper = box.ShortUpper
+	at.gridState.ShortBoxLower = box.ShortLower
+	at.gridState.MidBoxUpper = box.MidUpper
+	at.gridState.MidBoxLower = box.MidLower
+	at.gridState.LongBoxUpper = box.LongUpper
+	at.gridState.LongBoxLower = box.LongLower
+	at.gridState.mu.Unlock()
+
+	// Detect breakout
+	breakoutLevel, direction := detectBoxBreakout(box)
+
+	// Get current breakout state
+	state := &BreakoutState{
+		Level:        market.BreakoutLevel(at.gridState.BreakoutLevel),
+		Direction:    at.gridState.BreakoutDirection,
+		ConfirmCount: at.gridState.BreakoutConfirmCount,
+	}
+
+	// Check if breakout is confirmed (3 candles)
+	confirmed := confirmBreakout(state, breakoutLevel, direction)
+
+	// Update grid state
+	at.gridState.mu.Lock()
+	at.gridState.BreakoutLevel = string(state.Level)
+	at.gridState.BreakoutDirection = state.Direction
+	at.gridState.BreakoutConfirmCount = state.ConfirmCount
+	at.gridState.mu.Unlock()
+
+	if !confirmed {
+		return nil
+	}
+
+	// Take action based on breakout level
+	action := getBreakoutAction(breakoutLevel)
+	return at.executeBreakoutAction(action)
+}
+
+// executeBreakoutAction executes the appropriate action for a breakout
+func (at *AutoTrader) executeBreakoutAction(action BreakoutAction) error {
+	switch action {
+	case BreakoutActionReducePosition:
+		// Short box breakout: reduce position to 50%
+		logger.Infof("Short box breakout confirmed, reducing position to 50%%")
+		at.gridState.mu.Lock()
+		at.gridState.PositionReductionPct = 50
+		at.gridState.mu.Unlock()
+		return nil
+
+	case BreakoutActionPauseGrid:
+		// Mid box breakout: pause grid + cancel orders
+		logger.Infof("Mid box breakout confirmed, pausing grid and canceling orders")
+		at.gridState.mu.Lock()
+		at.gridState.IsPaused = true
+		at.gridState.mu.Unlock()
+		return at.cancelAllGridOrders()
+
+	case BreakoutActionCloseAll:
+		// Long box breakout: pause + cancel + close all
+		logger.Infof("Long box breakout confirmed, closing all positions")
+		at.gridState.mu.Lock()
+		at.gridState.IsPaused = true
+		at.gridState.mu.Unlock()
+		if err := at.cancelAllGridOrders(); err != nil {
+			logger.Infof("Failed to cancel orders: %v", err)
+		}
+		return at.closeAllPositions()
+	}
+
+	return nil
+}
+
+// closeAllPositions closes all open positions for the grid symbol
+func (at *AutoTrader) closeAllPositions() error {
+	gridConfig := at.config.StrategyConfig.GridConfig
+	if gridConfig == nil {
+		return nil
+	}
+
+	positions, err := at.trader.GetPositions()
+	if err != nil {
+		return fmt.Errorf("failed to get positions: %w", err)
+	}
+
+	for _, pos := range positions {
+		symbol, _ := pos["symbol"].(string)
+		if symbol != gridConfig.Symbol {
+			continue
+		}
+
+		size, _ := pos["positionAmt"].(float64)
+		if size == 0 {
+			continue
+		}
+
+		if size > 0 {
+			_, err = at.trader.CloseLong(symbol, size)
+		} else {
+			_, err = at.trader.CloseShort(symbol, -size)
+		}
+		if err != nil {
+			logger.Infof("Failed to close position: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// checkFalseBreakoutRecovery checks if price has returned to box after breakout
+func (at *AutoTrader) checkFalseBreakoutRecovery() error {
+	gridConfig := at.config.StrategyConfig.GridConfig
+	if gridConfig == nil {
+		return nil
+	}
+
+	at.gridState.mu.RLock()
+	breakoutLevel := at.gridState.BreakoutLevel
+	isPaused := at.gridState.IsPaused
+	positionReduction := at.gridState.PositionReductionPct
+	at.gridState.mu.RUnlock()
+
+	// Only check if we had a breakout
+	if breakoutLevel == string(market.BreakoutNone) && positionReduction == 0 && !isPaused {
+		return nil
+	}
+
+	// Get current box data
+	box, err := market.GetBoxData(gridConfig.Symbol)
+	if err != nil {
+		return nil
+	}
+
+	// Check if price is back inside the long box
+	if box.CurrentPrice >= box.LongLower && box.CurrentPrice <= box.LongUpper {
+		logger.Infof("Price returned to box, recovering with 50%% position")
+
+		at.gridState.mu.Lock()
+		at.gridState.BreakoutLevel = string(market.BreakoutNone)
+		at.gridState.BreakoutDirection = ""
+		at.gridState.BreakoutConfirmCount = 0
+		at.gridState.PositionReductionPct = 50 // Recover at 50%
+		at.gridState.IsPaused = false
+		at.gridState.mu.Unlock()
+	}
+
+	return nil
+}
+
 // ============================================================================
 // AutoTrader Grid Methods
 // ============================================================================
@@ -420,6 +602,16 @@ func (at *AutoTrader) RunGridCycle() error {
 		at.gridState.IsPaused = true
 		at.gridState.mu.Unlock()
 		return fmt.Errorf("daily loss limit exceeded: %.2f%%", dailyLossPct)
+	}
+
+	// Check multi-period box breakout
+	if err := at.checkBoxBreakout(); err != nil {
+		logger.Infof("Box breakout check error: %v", err)
+	}
+
+	// Check for false breakout recovery
+	if err := at.checkFalseBreakoutRecovery(); err != nil {
+		logger.Infof("False breakout recovery check error: %v", err)
 	}
 
 	// Check if grid is paused
