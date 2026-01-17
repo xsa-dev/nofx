@@ -555,3 +555,31 @@ func TestCalculateDonchian_InvalidPeriod(t *testing.T) {
 		t.Errorf("Expected (0, 0) for negative period, got (%v, %v)", upper, lower)
 	}
 }
+
+func TestCalculateBoxData(t *testing.T) {
+	// Create synthetic kline data
+	klines := make([]Kline, 500)
+	for i := 0; i < 500; i++ {
+		basePrice := 100.0
+		klines[i] = Kline{
+			High:  basePrice + float64(i%10),
+			Low:   basePrice - float64(i%10),
+			Close: basePrice,
+		}
+	}
+
+	box := ExportCalculateBoxData(klines, 100.0)
+
+	if box.ShortUpper == 0 || box.ShortLower == 0 {
+		t.Error("Short box should not be zero")
+	}
+	if box.MidUpper == 0 || box.MidLower == 0 {
+		t.Error("Mid box should not be zero")
+	}
+	if box.LongUpper == 0 || box.LongLower == 0 {
+		t.Error("Long box should not be zero")
+	}
+	if box.CurrentPrice != 100.0 {
+		t.Errorf("Expected CurrentPrice = 100.0, got %v", box.CurrentPrice)
+	}
+}

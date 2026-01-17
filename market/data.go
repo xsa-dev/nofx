@@ -1242,3 +1242,59 @@ func calculateDonchian(klines []Kline, period int) (upper, lower float64) {
 func ExportCalculateDonchian(klines []Kline, period int) (float64, float64) {
 	return calculateDonchian(klines, period)
 }
+
+// Box period constants (in 1h candles)
+const (
+	ShortBoxPeriod = 72  // 3 days of 1h candles
+	MidBoxPeriod   = 240 // 10 days of 1h candles
+	LongBoxPeriod  = 500 // ~21 days of 1h candles
+)
+
+// calculateBoxData calculates multi-period box data from klines
+func calculateBoxData(klines []Kline, currentPrice float64) *BoxData {
+	box := &BoxData{
+		CurrentPrice: currentPrice,
+	}
+
+	if len(klines) == 0 {
+		return box
+	}
+
+	box.ShortUpper, box.ShortLower = calculateDonchian(klines, ShortBoxPeriod)
+	box.MidUpper, box.MidLower = calculateDonchian(klines, MidBoxPeriod)
+	box.LongUpper, box.LongLower = calculateDonchian(klines, LongBoxPeriod)
+
+	return box
+}
+
+// ExportCalculateBoxData exports calculateBoxData for testing
+func ExportCalculateBoxData(klines []Kline, currentPrice float64) *BoxData {
+	return calculateBoxData(klines, currentPrice)
+}
+
+// GetBoxData fetches 1h klines and calculates box data for a symbol
+func GetBoxData(symbol string) (*BoxData, error) {
+	symbol = Normalize(symbol)
+
+	// Fetch 500 1h klines
+	var klines []Kline
+	var err error
+
+	if IsXyzDexAsset(symbol) {
+		klines, err = getKlinesFromHyperliquid(symbol, "1h", LongBoxPeriod)
+	} else {
+		klines, err = getKlinesFromCoinAnk(symbol, "1h", LongBoxPeriod)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get 1h klines: %w", err)
+	}
+
+	if len(klines) == 0 {
+		return nil, fmt.Errorf("no kline data available")
+	}
+
+	currentPrice := klines[len(klines)-1].Close
+
+	return calculateBoxData(klines, currentPrice), nil
+}
