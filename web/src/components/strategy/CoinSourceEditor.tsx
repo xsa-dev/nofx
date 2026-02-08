@@ -1,12 +1,20 @@
 import { useState } from 'react'
 import { Plus, X, Database, TrendingUp, TrendingDown, List, Ban, Zap, Shuffle } from 'lucide-react'
 import type { CoinSourceConfig } from '../../types'
+import { coinSource } from '../../i18n/strategy-translations'
 
 interface CoinSourceEditorProps {
   config: CoinSourceConfig
   onChange: (config: CoinSourceConfig) => void
   disabled?: boolean
   language: string
+}
+
+// Helper function to get translation from centralized file
+const t = (key: keyof typeof coinSource, language: string): string => {
+  const entry = coinSource[key]
+  if (!entry) return key
+  return entry[language as keyof typeof entry] || entry.en || key
 }
 
 export function CoinSourceEditor({
@@ -17,52 +25,6 @@ export function CoinSourceEditor({
 }: CoinSourceEditorProps) {
   const [newCoin, setNewCoin] = useState('')
   const [newExcludedCoin, setNewExcludedCoin] = useState('')
-
-  const t = (key: string) => {
-    const translations: Record<string, Record<string, string>> = {
-      sourceType: { zh: '数据来源类型', en: 'Source Type' },
-      static: { zh: '静态列表', en: 'Static List' },
-      ai500: { zh: 'AI500 数据源', en: 'AI500 Data Provider' },
-      oi_top: { zh: 'OI 持仓增加', en: 'OI Increase' },
-      oi_low: { zh: 'OI 持仓减少', en: 'OI Decrease' },
-      mixed: { zh: '混合模式', en: 'Mixed Mode' },
-      staticCoins: { zh: '自定义币种', en: 'Custom Coins' },
-      addCoin: { zh: '添加币种', en: 'Add Coin' },
-      useAI500: { zh: '启用 AI500 数据源', en: 'Enable AI500 Data Provider' },
-      ai500Limit: { zh: '数量上限', en: 'Limit' },
-      useOITop: { zh: '启用 OI 持仓增加榜', en: 'Enable OI Increase' },
-      oiTopLimit: { zh: '数量上限', en: 'Limit' },
-      useOILow: { zh: '启用 OI 持仓减少榜', en: 'Enable OI Decrease' },
-      oiLowLimit: { zh: '数量上限', en: 'Limit' },
-      staticDesc: { zh: '手动指定交易币种列表', en: 'Manually specify trading coins' },
-      ai500Desc: {
-        zh: '使用 AI500 智能筛选的热门币种',
-        en: 'Use AI500 smart-filtered popular coins',
-      },
-      oiTopDesc: {
-        zh: '持仓增加榜，适合做多',
-        en: 'OI increase ranking, for long',
-      },
-      oi_lowDesc: {
-        zh: '持仓减少榜，适合做空',
-        en: 'OI decrease ranking, for short',
-      },
-      mixedDesc: {
-        zh: '组合多种数据源',
-        en: 'Combine multiple sources',
-      },
-      mixedConfig: { zh: '组合数据源配置', en: 'Combined Sources Configuration' },
-      mixedSummary: { zh: '已选组合', en: 'Selected Sources' },
-      maxCoins: { zh: '最多', en: 'Up to' },
-      coins: { zh: '个币种', en: 'coins' },
-      dataSourceConfig: { zh: '数据源配置', en: 'Data Source Configuration' },
-      excludedCoins: { zh: '排除币种', en: 'Excluded Coins' },
-      excludedCoinsDesc: { zh: '这些币种将从所有数据源中排除，不会被交易', en: 'These coins will be excluded from all sources and will not be traded' },
-      addExcludedCoin: { zh: '添加排除', en: 'Add Excluded' },
-      nofxosNote: { zh: '使用 NofxOS API Key（在指标配置中设置）', en: 'Uses NofxOS API Key (set in Indicators config)' },
-    }
-    return translations[key]?.[language] || key
-  }
 
   const sourceTypes = [
     { value: 'static', icon: List, color: '#848E9C' },
@@ -97,18 +59,11 @@ export function CoinSourceEditor({
     return { sources, totalLimit }
   }
 
-  // xyz dex assets (stocks, forex, commodities) - should NOT get USDT suffix
+  // xyz dex assets
   const xyzDexAssets = new Set([
-    // Stocks
     'TSLA', 'NVDA', 'AAPL', 'MSFT', 'META', 'AMZN', 'GOOGL', 'AMD', 'COIN', 'NFLX',
     'PLTR', 'HOOD', 'INTC', 'MSTR', 'TSM', 'ORCL', 'MU', 'RIVN', 'COST', 'LLY',
-    'CRCL', 'SKHX', 'SNDK',
-    // Forex
-    'EUR', 'JPY',
-    // Commodities
-    'GOLD', 'SILVER',
-    // Index
-    'XYZ100',
+    'CRCL', 'SKHX', 'SNDK', 'EUR', 'JPY', 'GOLD', 'SILVER', 'XYZ100',
   ])
 
   const isXyzDexAsset = (symbol: string): boolean => {
@@ -119,11 +74,8 @@ export function CoinSourceEditor({
   const handleAddCoin = () => {
     if (!newCoin.trim()) return
     const symbol = newCoin.toUpperCase().trim()
-
-    // For xyz dex assets (stocks, forex, commodities), use xyz: prefix without USDT
     let formattedSymbol: string
     if (isXyzDexAsset(symbol)) {
-      // Remove xyz: prefix (case-insensitive) and any USD suffixes
       const base = symbol.replace(/^xyz:/i, '').replace(/USDT$|USD$|-USDC$/i, '')
       formattedSymbol = `xyz:${base}`
     } else {
@@ -132,26 +84,18 @@ export function CoinSourceEditor({
 
     const currentCoins = config.static_coins || []
     if (!currentCoins.includes(formattedSymbol)) {
-      onChange({
-        ...config,
-        static_coins: [...currentCoins, formattedSymbol],
-      })
+      onChange({ ...config, static_coins: [...currentCoins, formattedSymbol] })
     }
     setNewCoin('')
   }
 
   const handleRemoveCoin = (coin: string) => {
-    onChange({
-      ...config,
-      static_coins: (config.static_coins || []).filter((c) => c !== coin),
-    })
+    onChange({ ...config, static_coins: (config.static_coins || []).filter((c) => c !== coin) })
   }
 
   const handleAddExcludedCoin = () => {
     if (!newExcludedCoin.trim()) return
     const symbol = newExcludedCoin.toUpperCase().trim()
-
-    // For xyz dex assets, use xyz: prefix without USDT
     let formattedSymbol: string
     if (isXyzDexAsset(symbol)) {
       const base = symbol.replace(/^xyz:/i, '').replace(/USDT$|USD$|-USDC$/i, '')
@@ -162,45 +106,32 @@ export function CoinSourceEditor({
 
     const currentExcluded = config.excluded_coins || []
     if (!currentExcluded.includes(formattedSymbol)) {
-      onChange({
-        ...config,
-        excluded_coins: [...currentExcluded, formattedSymbol],
-      })
+      onChange({ ...config, excluded_coins: [...currentExcluded, formattedSymbol] })
     }
     setNewExcludedCoin('')
   }
 
   const handleRemoveExcludedCoin = (coin: string) => {
-    onChange({
-      ...config,
-      excluded_coins: (config.excluded_coins || []).filter((c) => c !== coin),
-    })
+    onChange({ ...config, excluded_coins: (config.excluded_coins || []).filter((c) => c !== coin) })
   }
 
-  // NofxOS badge component
   const NofxOSBadge = () => (
-    <span
-      className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30"
-    >
+    <span className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30">
       NofxOS
     </span>
   )
 
   return (
     <div className="space-y-6">
-      {/* Source Type Selector */}
       <div>
         <label className="block text-sm font-medium mb-3 text-nofx-text">
-          {t('sourceType')}
+          {t('sourceType', language)}
         </label>
         <div className="grid grid-cols-5 gap-2">
           {sourceTypes.map(({ value, icon: Icon, color }) => (
             <button
               key={value}
-              onClick={() =>
-                !disabled &&
-                onChange({ ...config, source_type: value as CoinSourceConfig['source_type'] })
-              }
+              onClick={() => !disabled && onChange({ ...config, source_type: value as CoinSourceConfig['source_type'] })}
               disabled={disabled}
               className={`p-4 rounded-lg border transition-all ${config.source_type === value
                 ? 'ring-2 ring-nofx-gold bg-nofx-gold/10'
@@ -209,34 +140,24 @@ export function CoinSourceEditor({
             >
               <Icon className="w-6 h-6 mx-auto mb-2" style={{ color }} />
               <div className="text-sm font-medium text-nofx-text">
-                {t(value)}
-              </div>
-              <div className="text-xs mt-1 text-nofx-text-muted">
-                {t(`${value}Desc`)}
+                {t(value as keyof typeof coinSource, language)}
               </div>
             </button>
           ))}
         </div>
       </div>
 
-      {/* Static Coins - only for static mode */}
       {config.source_type === 'static' && (
         <div>
           <label className="block text-sm font-medium mb-3 text-nofx-text">
-            {t('staticCoins')}
+            {t('staticCoins', language)}
           </label>
           <div className="flex flex-wrap gap-2 mb-3">
             {(config.static_coins || []).map((coin) => (
-              <span
-                key={coin}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-full text-sm bg-nofx-bg-lighter text-nofx-text"
-              >
+              <span key={coin} className="flex items-center gap-1 px-3 py-1.5 rounded-full text-sm bg-nofx-bg-lighter text-nofx-text">
                 {coin}
                 {!disabled && (
-                  <button
-                    onClick={() => handleRemoveCoin(coin)}
-                    className="ml-1 hover:text-red-400 transition-colors"
-                  >
+                  <button onClick={() => handleRemoveCoin(coin)} className="ml-1 hover:text-red-400 transition-colors">
                     <X className="w-3 h-3" />
                   </button>
                 )}
@@ -258,45 +179,32 @@ export function CoinSourceEditor({
                 className="px-4 py-2 rounded-lg flex items-center gap-2 transition-colors bg-nofx-gold text-black hover:bg-yellow-500"
               >
                 <Plus className="w-4 h-4" />
-                {t('addCoin')}
+                {t('addCoin', language)}
               </button>
             </div>
           )}
         </div>
       )}
 
-      {/* Excluded Coins */}
       <div>
         <div className="flex items-center gap-2 mb-3">
           <Ban className="w-4 h-4 text-nofx-danger" />
-          <label className="text-sm font-medium text-nofx-text">
-            {t('excludedCoins')}
-          </label>
+          <label className="text-sm font-medium text-nofx-text">{t('excludedCoins', language)}</label>
         </div>
-        <p className="text-xs mb-3 text-nofx-text-muted">
-          {t('excludedCoinsDesc')}
-        </p>
+        <p className="text-xs mb-3 text-nofx-text-muted">{t('excludedCoinsDesc', language)}</p>
         <div className="flex flex-wrap gap-2 mb-3">
           {(config.excluded_coins || []).map((coin) => (
-            <span
-              key={coin}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-full text-sm bg-nofx-danger/15 text-nofx-danger"
-            >
+            <span key={coin} className="flex items-center gap-1 px-3 py-1.5 rounded-full text-sm bg-nofx-danger/15 text-nofx-danger">
               {coin}
               {!disabled && (
-                <button
-                  onClick={() => handleRemoveExcludedCoin(coin)}
-                  className="ml-1 hover:text-white transition-colors"
-                >
+                <button onClick={() => handleRemoveExcludedCoin(coin)} className="ml-1 hover:text-white transition-colors">
                   <X className="w-3 h-3" />
                 </button>
               )}
             </span>
           ))}
           {(config.excluded_coins || []).length === 0 && (
-            <span className="text-xs italic text-nofx-text-muted">
-              {language === 'zh' ? '无' : 'None'}
-            </span>
+            <span className="text-xs italic text-nofx-text-muted">{language === 'zh' ? '无' : 'None'}</span>
           )}
         </div>
         {!disabled && (
@@ -314,420 +222,177 @@ export function CoinSourceEditor({
               className="px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm bg-nofx-danger text-white hover:bg-red-600"
             >
               <Ban className="w-4 h-4" />
-              {t('addExcludedCoin')}
+              {t('addExcludedCoin', language)}
             </button>
           </div>
         )}
       </div>
 
-      {/* AI500 Options - only for ai500 mode */}
       {config.source_type === 'ai500' && (
-        <div
-          className="p-4 rounded-lg bg-nofx-gold/5 border border-nofx-gold/20"
-        >
+        <div className="p-4 rounded-lg bg-nofx-gold/5 border border-nofx-gold/20">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Zap className="w-4 h-4 text-nofx-gold" />
-              <span className="text-sm font-medium text-nofx-text">
-                AI500 {t('dataSourceConfig')}
-              </span>
+              <span className="text-sm font-medium text-nofx-text">AI500 {t('dataSourceConfig', language)}</span>
               <NofxOSBadge />
             </div>
           </div>
-
           <div className="space-y-3">
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
                 checked={config.use_ai500}
-                onChange={(e) =>
-                  !disabled && onChange({ ...config, use_ai500: e.target.checked })
-                }
+                onChange={(e) => !disabled && onChange({ ...config, use_ai500: e.target.checked })}
                 disabled={disabled}
                 className="w-5 h-5 rounded accent-nofx-gold"
               />
-              <span className="text-nofx-text">{t('useAI500')}</span>
+              <span className="text-nofx-text">{t('useAI500', language)}</span>
             </label>
-
             {config.use_ai500 && (
               <div className="flex items-center gap-3 pl-8">
-                <span className="text-sm text-nofx-text-muted">
-                  {t('ai500Limit')}:
-                </span>
+                <span className="text-sm text-nofx-text-muted">{t('ai500Limit', language)}:</span>
                 <select
                   value={config.ai500_limit || 10}
-                  onChange={(e) =>
-                    !disabled &&
-                    onChange({ ...config, ai500_limit: parseInt(e.target.value) || 10 })
-                  }
+                  onChange={(e) => !disabled && onChange({ ...config, ai500_limit: parseInt(e.target.value) || 10 })}
                   disabled={disabled}
                   className="px-3 py-1.5 rounded bg-nofx-bg border border-nofx-gold/20 text-nofx-text"
                 >
-                  {[5, 10, 15, 20, 30, 50].map(n => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
+                  {[5, 10, 15, 20, 30, 50].map(n => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
             )}
-
-            <p className="text-xs pl-8 text-nofx-text-muted">
-              {t('nofxosNote')}
-            </p>
+            <p className="text-xs pl-8 text-nofx-text-muted">{t('nofxosNote', language)}</p>
           </div>
         </div>
       )}
 
-      {/* OI Top Options - only for oi_top mode */}
       {config.source_type === 'oi_top' && (
-        <div
-          className="p-4 rounded-lg bg-nofx-success/5 border border-nofx-success/20"
-        >
+        <div className="p-4 rounded-lg bg-nofx-success/5 border border-nofx-success/20">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-nofx-success" />
               <span className="text-sm font-medium text-nofx-text">
-                OI {language === 'zh' ? '持仓增加榜' : 'Increase'} {t('dataSourceConfig')}
+                OI {language === 'zh' ? '持仓增加榜' : 'Increase'} {t('dataSourceConfig', language)}
               </span>
               <NofxOSBadge />
             </div>
           </div>
-
           <div className="space-y-3">
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
                 checked={config.use_oi_top}
-                onChange={(e) =>
-                  !disabled && onChange({ ...config, use_oi_top: e.target.checked })
-                }
+                onChange={(e) => !disabled && onChange({ ...config, use_oi_top: e.target.checked })}
                 disabled={disabled}
                 className="w-5 h-5 rounded accent-nofx-success"
               />
-              <span className="text-nofx-text">{t('useOITop')}</span>
+              <span className="text-nofx-text">{t('useOITop', language)}</span>
             </label>
-
             {config.use_oi_top && (
               <div className="flex items-center gap-3 pl-8">
-                <span className="text-sm text-nofx-text-muted">
-                  {t('oiTopLimit')}:
-                </span>
+                <span className="text-sm text-nofx-text-muted">{t('oiTopLimit', language)}:</span>
                 <select
                   value={config.oi_top_limit || 10}
-                  onChange={(e) =>
-                    !disabled &&
-                    onChange({ ...config, oi_top_limit: parseInt(e.target.value) || 10 })
-                  }
+                  onChange={(e) => !disabled && onChange({ ...config, oi_top_limit: parseInt(e.target.value) || 10 })}
                   disabled={disabled}
                   className="px-3 py-1.5 rounded bg-nofx-bg border border-nofx-gold/20 text-nofx-text"
                 >
-                  {[5, 10, 15, 20, 30, 50].map(n => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
+                  {[5, 10, 15, 20, 30, 50].map(n => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
             )}
-
-            <p className="text-xs pl-8 text-nofx-text-muted">
-              {t('nofxosNote')}
-            </p>
+            <p className="text-xs pl-8 text-nofx-text-muted">{t('nofxosNote', language)}</p>
           </div>
         </div>
       )}
 
-      {/* OI Low Options - only for oi_low mode */}
       {config.source_type === 'oi_low' && (
-        <div
-          className="p-4 rounded-lg bg-nofx-danger/5 border border-nofx-danger/20"
-        >
+        <div className="p-4 rounded-lg bg-nofx-danger/5 border border-nofx-danger/20">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <TrendingDown className="w-4 h-4 text-nofx-danger" />
               <span className="text-sm font-medium text-nofx-text">
-                OI {language === 'zh' ? '持仓减少榜' : 'Decrease'} {t('dataSourceConfig')}
+                OI {language === 'zh' ? '持仓减少榜' : 'Decrease'} {t('dataSourceConfig', language)}
               </span>
               <NofxOSBadge />
             </div>
           </div>
-
           <div className="space-y-3">
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
                 checked={config.use_oi_low}
-                onChange={(e) =>
-                  !disabled && onChange({ ...config, use_oi_low: e.target.checked })
-                }
+                onChange={(e) => !disabled && onChange({ ...config, use_oi_low: e.target.checked })}
                 disabled={disabled}
                 className="w-5 h-5 rounded accent-red-500"
               />
-              <span className="text-nofx-text">{t('useOILow')}</span>
+              <span className="text-nofx-text">{t('useOILow', language)}</span>
             </label>
-
             {config.use_oi_low && (
               <div className="flex items-center gap-3 pl-8">
-                <span className="text-sm text-nofx-text-muted">
-                  {t('oiLowLimit')}:
-                </span>
+                <span className="text-sm text-nofx-text-muted">{t('oiLowLimit', language)}:</span>
                 <select
                   value={config.oi_low_limit || 10}
-                  onChange={(e) =>
-                    !disabled &&
-                    onChange({ ...config, oi_low_limit: parseInt(e.target.value) || 10 })
-                  }
+                  onChange={(e) => !disabled && onChange({ ...config, oi_low_limit: parseInt(e.target.value) || 10 })}
                   disabled={disabled}
                   className="px-3 py-1.5 rounded bg-nofx-bg border border-nofx-gold/20 text-nofx-text"
                 >
-                  {[5, 10, 15, 20, 30, 50].map(n => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
+                  {[5, 10, 15, 20, 30, 50].map(n => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
             )}
-
-            <p className="text-xs pl-8 text-nofx-text-muted">
-              {t('nofxosNote')}
-            </p>
+            <p className="text-xs pl-8 text-nofx-text-muted">{t('nofxosNote', language)}</p>
           </div>
         </div>
       )}
 
-      {/* Mixed Mode - Unified Card Selector */}
       {config.source_type === 'mixed' && (
         <div className="p-4 rounded-lg bg-blue-500/5 border border-blue-500/20">
           <div className="flex items-center gap-2 mb-4">
             <Shuffle className="w-4 h-4 text-blue-400" />
-            <span className="text-sm font-medium text-nofx-text">
-              {t('mixedConfig')}
-            </span>
+            <span className="text-sm font-medium text-nofx-text">{t('mixedConfig', language)}</span>
           </div>
-
-          {/* 4 Source Cards in 2x2 Grid */}
           <div className="grid grid-cols-2 gap-3 mb-4">
-            {/* AI500 Card */}
-            <div
-              className={`p-3 rounded-lg border transition-all cursor-pointer ${
-                config.use_ai500
-                  ? 'bg-nofx-gold/10 border-nofx-gold/50'
-                  : 'bg-nofx-bg border-nofx-border hover:border-nofx-gold/30'
-              }`}
-              onClick={() => !disabled && onChange({ ...config, use_ai500: !config.use_ai500 })}
-            >
+            <div className={`p-3 rounded-lg border transition-all cursor-pointer ${config.use_ai500 ? 'bg-nofx-gold/10 border-nofx-gold/50' : 'bg-nofx-bg border-nofx-border hover:border-nofx-gold/30'}`} onClick={() => !disabled && onChange({ ...config, use_ai500: !config.use_ai500 })}>
               <div className="flex items-center gap-2 mb-2">
-                <input
-                  type="checkbox"
-                  checked={config.use_ai500}
-                  onChange={(e) => !disabled && onChange({ ...config, use_ai500: e.target.checked })}
-                  disabled={disabled}
-                  className="w-4 h-4 rounded accent-nofx-gold"
-                  onClick={(e) => e.stopPropagation()}
-                />
+                <input type="checkbox" checked={config.use_ai500} onChange={(e) => { e.stopPropagation(); !disabled && onChange({ ...config, use_ai500: e.target.checked }) }} disabled={disabled} className="w-4 h-4 rounded accent-nofx-gold" onClick={(e) => e.stopPropagation()} />
                 <Database className="w-4 h-4 text-nofx-gold" />
                 <span className="text-sm font-medium text-nofx-text">AI500</span>
                 <NofxOSBadge />
               </div>
-              {config.use_ai500 && (
-                <div className="flex items-center gap-2 mt-2 pl-6">
-                  <span className="text-xs text-nofx-text-muted">Limit:</span>
-                  <select
-                    value={config.ai500_limit || 10}
-                    onChange={(e) => {
-                      e.stopPropagation()
-                      !disabled && onChange({ ...config, ai500_limit: parseInt(e.target.value) || 10 })
-                    }}
-                    disabled={disabled}
-                    className="px-2 py-1 rounded text-xs bg-nofx-bg border border-nofx-gold/20 text-nofx-text"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {[5, 10, 15, 20, 30, 50].map(n => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
             </div>
-
-            {/* OI Top Card */}
-            <div
-              className={`p-3 rounded-lg border transition-all cursor-pointer ${
-                config.use_oi_top
-                  ? 'bg-nofx-success/10 border-nofx-success/50'
-                  : 'bg-nofx-bg border-nofx-border hover:border-nofx-success/30'
-              }`}
-              onClick={() => !disabled && onChange({ ...config, use_oi_top: !config.use_oi_top })}
-            >
+            <div className={`p-3 rounded-lg border transition-all cursor-pointer ${config.use_oi_top ? 'bg-nofx-success/10 border-nofx-success/50' : 'bg-nofx-bg border-nofx-border hover:border-nofx-success/30'}`} onClick={() => !disabled && onChange({ ...config, use_oi_top: !config.use_oi_top })}>
               <div className="flex items-center gap-2 mb-2">
-                <input
-                  type="checkbox"
-                  checked={config.use_oi_top}
-                  onChange={(e) => !disabled && onChange({ ...config, use_oi_top: e.target.checked })}
-                  disabled={disabled}
-                  className="w-4 h-4 rounded accent-nofx-success"
-                  onClick={(e) => e.stopPropagation()}
-                />
+                <input type="checkbox" checked={config.use_oi_top} onChange={(e) => { e.stopPropagation(); !disabled && onChange({ ...config, use_oi_top: e.target.checked }) }} disabled={disabled} className="w-4 h-4 rounded accent-nofx-success" onClick={(e) => e.stopPropagation()} />
                 <TrendingUp className="w-4 h-4 text-nofx-success" />
-                <span className="text-sm font-medium text-nofx-text">
-                  {language === 'zh' ? 'OI 增加' : 'OI Increase'}
-                </span>
+                <span className="text-sm font-medium text-nofx-text">{language === 'zh' ? 'OI 增加' : 'OI Increase'}</span>
               </div>
-              <p className="text-xs text-nofx-text-muted pl-6 mb-1">
-                {language === 'zh' ? '适合做多' : 'For long'}
-              </p>
-              {config.use_oi_top && (
-                <div className="flex items-center gap-2 mt-2 pl-6">
-                  <span className="text-xs text-nofx-text-muted">Limit:</span>
-                  <select
-                    value={config.oi_top_limit || 10}
-                    onChange={(e) => {
-                      e.stopPropagation()
-                      !disabled && onChange({ ...config, oi_top_limit: parseInt(e.target.value) || 10 })
-                    }}
-                    disabled={disabled}
-                    className="px-2 py-1 rounded text-xs bg-nofx-bg border border-nofx-gold/20 text-nofx-text"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {[5, 10, 15, 20, 30, 50].map(n => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
             </div>
-
-            {/* OI Low Card */}
-            <div
-              className={`p-3 rounded-lg border transition-all cursor-pointer ${
-                config.use_oi_low
-                  ? 'bg-nofx-danger/10 border-nofx-danger/50'
-                  : 'bg-nofx-bg border-nofx-border hover:border-nofx-danger/30'
-              }`}
-              onClick={() => !disabled && onChange({ ...config, use_oi_low: !config.use_oi_low })}
-            >
+            <div className={`p-3 rounded-lg border transition-all cursor-pointer ${config.use_oi_low ? 'bg-nofx-danger/10 border-nofx-danger/50' : 'bg-nofx-bg border-nofx-border hover:border-nofx-danger/30'}`} onClick={() => !disabled && onChange({ ...config, use_oi_low: !config.use_oi_low })}>
               <div className="flex items-center gap-2 mb-2">
-                <input
-                  type="checkbox"
-                  checked={config.use_oi_low}
-                  onChange={(e) => !disabled && onChange({ ...config, use_oi_low: e.target.checked })}
-                  disabled={disabled}
-                  className="w-4 h-4 rounded accent-red-500"
-                  onClick={(e) => e.stopPropagation()}
-                />
+                <input type="checkbox" checked={config.use_oi_low} onChange={(e) => { e.stopPropagation(); !disabled && onChange({ ...config, use_oi_low: e.target.checked }) }} disabled={disabled} className="w-4 h-4 rounded accent-red-500" onClick={(e) => e.stopPropagation()} />
                 <TrendingDown className="w-4 h-4 text-nofx-danger" />
-                <span className="text-sm font-medium text-nofx-text">
-                  {language === 'zh' ? 'OI 减少' : 'OI Decrease'}
-                </span>
+                <span className="text-sm font-medium text-nofx-text">{language === 'zh' ? 'OI 减少' : 'OI Decrease'}</span>
               </div>
-              <p className="text-xs text-nofx-text-muted pl-6 mb-1">
-                {language === 'zh' ? '适合做空' : 'For short'}
-              </p>
-              {config.use_oi_low && (
-                <div className="flex items-center gap-2 mt-2 pl-6">
-                  <span className="text-xs text-nofx-text-muted">Limit:</span>
-                  <select
-                    value={config.oi_low_limit || 10}
-                    onChange={(e) => {
-                      e.stopPropagation()
-                      !disabled && onChange({ ...config, oi_low_limit: parseInt(e.target.value) || 10 })
-                    }}
-                    disabled={disabled}
-                    className="px-2 py-1 rounded text-xs bg-nofx-bg border border-nofx-gold/20 text-nofx-text"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {[5, 10, 15, 20, 30, 50].map(n => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
             </div>
-
-            {/* Static/Custom Card */}
-            <div
-              className={`p-3 rounded-lg border transition-all cursor-pointer ${
-                (config.static_coins || []).length > 0
-                  ? 'bg-gray-500/10 border-gray-500/50'
-                  : 'bg-nofx-bg border-nofx-border hover:border-gray-500/30'
-              }`}
-            >
+            <div className={`p-3 rounded-lg border ${(config.static_coins || []).length > 0 ? 'bg-gray-500/10 border-gray-500/50' : 'bg-nofx-bg border-nofx-border'}`}>
               <div className="flex items-center gap-2 mb-2">
                 <List className="w-4 h-4 text-gray-400" />
-                <span className="text-sm font-medium text-nofx-text">
-                  {language === 'zh' ? '自定义' : 'Custom'}
-                </span>
-                {(config.static_coins || []).length > 0 && (
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-gray-500/20 text-gray-400">
-                    {config.static_coins?.length}
-                  </span>
-                )}
+                <span className="text-sm font-medium text-nofx-text">{language === 'zh' ? '自定义' : 'Custom'}</span>
+                {(config.static_coins || []).length > 0 && <span className="text-xs px-1.5 py-0.5 rounded bg-gray-500/20 text-gray-400">{config.static_coins?.length}</span>}
               </div>
-              <div className="flex flex-wrap gap-1 mt-2">
-                {(config.static_coins || []).slice(0, 3).map((coin) => (
-                  <span
-                    key={coin}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-nofx-bg-lighter text-nofx-text"
-                  >
-                    {coin}
-                    {!disabled && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleRemoveCoin(coin)
-                        }}
-                        className="hover:text-red-400 transition-colors"
-                      >
-                        <X className="w-2.5 h-2.5" />
-                      </button>
-                    )}
-                  </span>
-                ))}
-                {(config.static_coins || []).length > 3 && (
-                  <span className="text-xs text-nofx-text-muted">
-                    +{(config.static_coins?.length || 0) - 3}
-                  </span>
-                )}
-              </div>
-              {!disabled && (
-                <div className="flex gap-1 mt-2">
-                  <input
-                    type="text"
-                    value={newCoin}
-                    onChange={(e) => setNewCoin(e.target.value)}
-                    onKeyDown={(e) => {
-                      e.stopPropagation()
-                      if (e.key === 'Enter') handleAddCoin()
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    placeholder="BTC, ETH..."
-                    className="flex-1 px-2 py-1 rounded text-xs bg-nofx-bg border border-nofx-gold/20 text-nofx-text"
-                  />
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleAddCoin()
-                    }}
-                    className="px-2 py-1 rounded text-xs bg-nofx-gold text-black hover:bg-yellow-500"
-                  >
-                    <Plus className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
             </div>
           </div>
-
-          {/* Summary */}
           {(() => {
             const { sources, totalLimit } = getMixedSummary()
             if (sources.length === 0) return null
             return (
               <div className="p-2 rounded bg-nofx-bg border border-nofx-border">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-nofx-text-muted">{t('mixedSummary')}:</span>
-                  <span className="text-nofx-text font-medium">
-                    {sources.join(' + ')}
-                  </span>
+                  <span className="text-nofx-text-muted">{t('mixedSummary', language)}:</span>
+                  <span className="text-nofx-text font-medium">{sources.join(' + ')}</span>
                 </div>
-                <div className="text-xs text-nofx-text-muted mt-1">
-                  {t('maxCoins')} {totalLimit} {t('coins')}
-                </div>
+                <div className="text-xs text-nofx-text-muted mt-1">{t('maxCoins', language)} {totalLimit} {t('coins', language)}</div>
               </div>
             )
           })()}
