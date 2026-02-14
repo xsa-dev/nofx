@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"net/url"
 	"nofx/config"
+	"strings"
 	"time"
 )
 
 const (
-	DataAPIURL = "https://data.alpaca.markets/v2"
+	DataAPIURL    = "https://data.alpaca.markets/v2"
+	CryptoDataURL = "https://data.alpaca.markets/v1beta1"
 )
 
 // Bar represents a single OHLCV bar from Alpaca
@@ -132,6 +134,48 @@ func (c *Client) GetBars(ctx context.Context, symbol string, timeframe string, l
 
 // MapTimeframe maps common timeframe strings to Alpaca format
 func MapTimeframe(interval string) string {
+	return MapTimeframeForAsset(interval, "crypto")
+}
+
+// MapTimeframeForAsset maps timeframe strings to Alpaca format for specific asset type
+func MapTimeframeForAsset(interval string, assetType string) string {
+	// Crypto uses different timeframe format
+	if assetType == "crypto" {
+		switch interval {
+		case "1m":
+			return "1Min"
+		case "3m":
+			return "1Min"
+		case "5m":
+			return "5Min"
+		case "10m":
+			return "15Min"
+		case "15m":
+			return "15Min"
+		case "30m":
+			return "30Min"
+		case "1h":
+			return "1Hour"
+		case "2h":
+			return "1Hour"
+		case "4h":
+			return "4Hour"
+		case "6h":
+			return "4Hour"
+		case "8h":
+			return "4Hour"
+		case "12h":
+			return "4Hour"
+		case "1d":
+			return "1Day"
+		case "1w":
+			return "1Week"
+		default:
+			return "5Min"
+		}
+	}
+
+	// Stock timeframe mapping (original)
 	switch interval {
 	case "1m":
 		return "1Min"
@@ -168,4 +212,110 @@ func MapTimeframe(interval string) string {
 	default:
 		return "5Min" // Default to 5 minutes
 	}
+}
+
+// GetCryptoBars fetches historical bars for a crypto symbol
+// symbol: e.g., "BTC/USD", "ETH/USD"
+// timeframe: 1Min, 5Min, 15Min, 30Min, 1Hour, 4Hour, 1Day
+func (c *Client) GetCryptoBars(ctx context.Context, symbol string, timeframe string, limit int) ([]Bar, error) {
+	if c.apiKey == "" || c.secretKey == "" {
+		return nil, fmt.Errorf("alpaca API keys not configured")
+	}
+
+	// Build URL - crypto uses v1beta1 endpoint
+	endpoint := fmt.Sprintf("%s/crypto/%s/bars", CryptoDataURL, symbol)
+	params := url.Values{}
+	params.Set("timeframe", timeframe)
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	params.Set("adjustment", "raw")
+
+	// Set time range: last 30 days for intraday, last 2 years for daily
+	now := time.Now()
+	var start time.Time
+	switch timeframe {
+	case "1Day", "1Week":
+		start = now.AddDate(-2, 0, 0) // 2 years back
+	default:
+		start = now.AddDate(0, 0, -30) // 30 days back for intraday
+	}
+	params.Set("start", start.Format(time.RFC3339))
+	params.Set("end", now.Format(time.RFC3339))
+
+	fullURL := endpoint + "?" + params.Encode()
+
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set auth headers
+	req.Header.Set("APCA-API-KEY-ID", c.apiKey)
+	req.Header.Set("APCA-API-SECRET-KEY", c.secretKey)
+
+	// Execute request
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("alpaca crypto API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var result BarsResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return result.Bars, nil
+}
+
+// ConvertSymbolToAlpacaFormat converts standard crypto symbol to Alpaca format
+// e.g., "BTCUSDT" -> "BTC/USD", "ETHUSDT" -> "ETH/USD"
+func ConvertSymbolToAlpacaFormat(symbol string) string {
+	// Common USDT pairs
+	usdtPairs := map[string]string{
+		"BTCUSDT":   "BTC/USD",
+		"ETHUSDT":   "ETH/USD",
+		"BNBUSDT":   "BNB/USD",
+		"SOLUSDT":   "SOL/USD",
+		"XRPUSDT":   "XRP/USD",
+		"ADAUSDT":   "ADA/USD",
+		"DOGEUSDT":  "DOGE/USD",
+		"AVAXUSDT":  "AVAX/USD",
+		"DOTUSDT":   "DOT/USD",
+		"MATICUSDT": "MATIC/USD",
+		"LINKUSDT":  "LINK/USD",
+		"UNIUSDT":   "UNI/USD",
+		"ATOMUSDT":  "ATOM/USD",
+		"LTCUSDT":   "LTC/USD",
+		"BCHUSDT":   "BCH/USD",
+	}
+
+	upperSymbol := strings.ToUpper(symbol)
+	if val, ok := usdtPairs[upperSymbol]; ok {
+		return val
+	}
+
+	// If already in correct format, return as is
+	if strings.Contains(symbol, "/") {
+		return symbol
+	}
+
+	// Default: assume last 4 chars are USDT and replace with /USD
+	if len(symbol) > 4 {
+		return symbol[:len(symbol)-4] + "/" + symbol[len(symbol)-3:]
+	}
+
+	return symbol
 }

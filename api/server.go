@@ -13,13 +13,14 @@ import (
 	"nofx/logger"
 	"nofx/manager"
 	"nofx/market"
-	"nofx/provider/alpaca"
+	alpacaProvider "nofx/provider/alpaca"
 	"nofx/provider/coinank/coinank_api"
 	"nofx/provider/coinank/coinank_enum"
 	"nofx/provider/hyperliquid"
 	"nofx/provider/twelvedata"
 	"nofx/store"
 	"nofx/trader"
+	"nofx/trader/alpaca"
 	"nofx/trader/aster"
 	"nofx/trader/binance"
 	"nofx/trader/bitget"
@@ -465,6 +466,7 @@ type SafeExchangeConfig struct {
 	AsterUser             string `json:"asterUser"`             // Aster username (not sensitive)
 	AsterSigner           string `json:"asterSigner"`           // Aster signer (not sensitive)
 	LighterWalletAddr     string `json:"lighterWalletAddr"`     // LIGHTER wallet address (not sensitive)
+	PaperMode             bool   `json:"paperMode"`             // Alpaca paper trading mode
 }
 
 type UpdateModelConfigRequest struct {
@@ -491,6 +493,9 @@ type UpdateExchangeConfigRequest struct {
 		LighterPrivateKey       string `json:"lighter_private_key"`
 		LighterAPIKeyPrivateKey string `json:"lighter_api_key_private_key"`
 		LighterAPIKeyIndex      int    `json:"lighter_api_key_index"`
+		PaperMode               bool   `json:"paper_mode"`
+		PaperAPIKey             string `json:"paper_api_key"`
+		PaperSecretKey          string `json:"paper_secret_key"`
 	} `json:"exchanges"`
 }
 
@@ -646,6 +651,20 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 				)
 			} else {
 				createErr = fmt.Errorf("Lighter requires wallet address and API Key private key")
+			}
+		case "alpaca":
+			var alpacaAPIKey, alpacaSecretKey string
+			if exchangeCfg.PaperMode {
+				alpacaAPIKey = string(exchangeCfg.PaperAPIKey)
+				alpacaSecretKey = string(exchangeCfg.PaperSecretKey)
+			} else {
+				alpacaAPIKey = string(exchangeCfg.APIKey)
+				alpacaSecretKey = string(exchangeCfg.SecretKey)
+			}
+			if alpacaAPIKey == "" || alpacaSecretKey == "" {
+				createErr = fmt.Errorf("Alpaca requires API key and secret key")
+			} else {
+				tempTrader = alpaca.NewAlpacaTrader(alpacaAPIKey, alpacaSecretKey, exchangeCfg.PaperMode, userID)
 			}
 		default:
 			logger.Infof("⚠️ Unsupported exchange type: %s, using user input for initial balance", exchangeCfg.ExchangeType)
@@ -1831,6 +1850,7 @@ func (s *Server) handleGetExchangeConfigs(c *gin.Context) {
 			AsterUser:             exchange.AsterUser,
 			AsterSigner:           exchange.AsterSigner,
 			LighterWalletAddr:     exchange.LighterWalletAddr,
+			PaperMode:             exchange.PaperMode,
 		}
 	}
 
@@ -1906,7 +1926,7 @@ func (s *Server) handleUpdateExchangeConfigs(c *gin.Context) {
 			tradersToReload[t.ID] = true
 		}
 
-		err := s.store.Exchange().Update(userID, exchangeID, exchangeData.Enabled, exchangeData.APIKey, exchangeData.SecretKey, exchangeData.Passphrase, exchangeData.Testnet, exchangeData.HyperliquidWalletAddr, exchangeData.AsterUser, exchangeData.AsterSigner, exchangeData.AsterPrivateKey, exchangeData.LighterWalletAddr, exchangeData.LighterPrivateKey, exchangeData.LighterAPIKeyPrivateKey, exchangeData.LighterAPIKeyIndex)
+		err := s.store.Exchange().Update(userID, exchangeID, exchangeData.Enabled, exchangeData.APIKey, exchangeData.SecretKey, exchangeData.Passphrase, exchangeData.Testnet, exchangeData.HyperliquidWalletAddr, exchangeData.AsterUser, exchangeData.AsterSigner, exchangeData.AsterPrivateKey, exchangeData.LighterWalletAddr, exchangeData.LighterPrivateKey, exchangeData.LighterAPIKeyPrivateKey, exchangeData.LighterAPIKeyIndex, exchangeData.PaperMode, exchangeData.PaperAPIKey, exchangeData.PaperSecretKey)
 		if err != nil {
 			SafeInternalError(c, fmt.Sprintf("Update exchange %s", exchangeID), err)
 			return
@@ -2650,10 +2670,10 @@ func (s *Server) getKlinesFromCoinank(symbol, interval, exchange string, limit i
 // getKlinesFromAlpaca fetches kline data from Alpaca API for US stocks
 func (s *Server) getKlinesFromAlpaca(symbol, interval string, limit int) ([]market.Kline, error) {
 	// Create Alpaca client
-	client := alpaca.NewClient()
+	client := alpacaProvider.NewClient()
 
 	// Map interval to Alpaca timeframe format
-	timeframe := alpaca.MapTimeframe(interval)
+	timeframe := alpacaProvider.MapTimeframe(interval)
 
 	// Fetch bars from Alpaca
 	ctx := context.Background()
