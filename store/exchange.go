@@ -185,7 +185,8 @@ func getExchangeNameAndType(exchangeType string) (name string, typ string) {
 func (s *ExchangeStore) Create(userID, exchangeType, accountName string, enabled bool,
 	apiKey, secretKey, passphrase string, testnet bool,
 	hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey,
-	lighterWalletAddr, lighterPrivateKey, lighterApiKeyPrivateKey string, lighterApiKeyIndex int) (string, error) {
+	lighterWalletAddr, lighterPrivateKey, lighterApiKeyPrivateKey string, lighterApiKeyIndex int,
+	paperMode bool, paperAPIKey, paperSecretKey string) (string, error) {
 
 	id := uuid.New().String()
 	name, typ := getExchangeNameAndType(exchangeType)
@@ -217,6 +218,9 @@ func (s *ExchangeStore) Create(userID, exchangeType, accountName string, enabled
 		LighterPrivateKey:       crypto.EncryptedString(lighterPrivateKey),
 		LighterAPIKeyPrivateKey: crypto.EncryptedString(lighterApiKeyPrivateKey),
 		LighterAPIKeyIndex:      lighterApiKeyIndex,
+		PaperMode:               paperMode,
+		PaperAPIKey:             crypto.EncryptedString(paperAPIKey),
+		PaperSecretKey:          crypto.EncryptedString(paperSecretKey),
 	}
 
 	if err := s.db.Create(exchange).Error; err != nil {
@@ -313,12 +317,12 @@ func (s *ExchangeStore) Delete(userID, id string) error {
 // CreateLegacy creates exchange configuration (legacy API for backward compatibility)
 // This method is deprecated, use Create instead
 func (s *ExchangeStore) CreateLegacy(userID, id, name, typ string, enabled bool, apiKey, secretKey string, testnet bool,
-	hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey string) error {
+	hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey string, paperMode bool, paperAPIKey, paperSecretKey string) error {
 
 	// Check if this is an old-style ID (exchange type as ID)
-	if id == "binance" || id == "bybit" || id == "okx" || id == "bitget" || id == "hyperliquid" || id == "aster" || id == "lighter" {
+	if id == "binance" || id == "bybit" || id == "okx" || id == "bitget" || id == "hyperliquid" || id == "aster" || id == "lighter" || id == "alpaca" {
 		_, err := s.Create(userID, id, "Default", enabled, apiKey, secretKey, "", testnet,
-			hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey, "", "", "", 0)
+			hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey, "", "", "", 0, paperMode, paperAPIKey, paperSecretKey)
 		return err
 	}
 
