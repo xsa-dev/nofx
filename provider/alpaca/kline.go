@@ -9,12 +9,22 @@ import (
 	"net/url"
 	"nofx/config"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
 	DataAPIURL    = "https://data.alpaca.markets/v2"
-	CryptoDataURL = "https://data.alpaca.markets/v1beta1"
+	CryptoDataURL = "https://data.alpaca.markets/v1beta3"
+	CryptoLoc     = "us"
+)
+
+var (
+	cryptoAssetsCache struct {
+		sync.RWMutex
+		Assets    []CryptoAsset
+		ExpiresAt time.Time
+	}
 )
 
 // Bar represents a single OHLCV bar from Alpaca
@@ -34,6 +44,20 @@ type BarsResponse struct {
 	Bars          []Bar  `json:"bars"`
 	Symbol        string `json:"symbol"`
 	NextPageToken string `json:"next_page_token"`
+}
+
+// CryptoAsset represents a crypto asset available on Alpaca
+type CryptoAsset struct {
+	Symbol       string `json:"symbol"`
+	Name         string `json:"name"`
+	Tradable     bool   `json:"tradable"`
+	Shortable    bool   `json:"shortable"`
+	EasyToBorrow bool   `json:"easy_to_borrow"`
+}
+
+// CryptoAssetsResponse represents the response from Alpaca crypto assets API
+type CryptoAssetsResponse struct {
+	Assets []CryptoAsset `json:"assets"`
 }
 
 // Client is the Alpaca API client
@@ -222,8 +246,9 @@ func (c *Client) GetCryptoBars(ctx context.Context, symbol string, timeframe str
 		return nil, fmt.Errorf("alpaca API keys not configured")
 	}
 
-	// Build URL - crypto uses v1beta1 endpoint
-	endpoint := fmt.Sprintf("%s/crypto/%s/bars", CryptoDataURL, symbol)
+	// Build URL
+	encodedSymbol := url.PathEscape(symbol)
+	endpoint := fmt.Sprintf("%s/crypto/%s/%s/bars", CryptoDataURL, CryptoLoc, encodedSymbol)
 	params := url.Values{}
 	params.Set("timeframe", timeframe)
 	params.Set("limit", fmt.Sprintf("%d", limit))
@@ -278,6 +303,80 @@ func (c *Client) GetCryptoBars(ctx context.Context, symbol string, timeframe str
 	}
 
 	return result.Bars, nil
+}
+
+// GetCryptoAssets fetches available crypto assets from Alpaca
+func (c *Client) GetCryptoAssets(ctx context.Context) ([]CryptoAsset, error) {
+	if c.apiKey == "" || c.secretKey == "" {
+		return nil, fmt.Errorf("alpaca API keys not configured")
+	}
+
+	endpoint := fmt.Sprintf("%s/crypto", CryptoDataURL)
+	fullURL := endpoint
+
+	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("APCA-API-KEY-ID", c.apiKey)
+	req.Header.Set("APCA-API-SECRET-KEY", c.secretKey)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("alpaca crypto assets API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result CryptoAssetsResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return result.Assets, nil
+}
+
+// IsCryptoSymbolSupported checks if a symbol is available on Alpaca
+func (c *Client) IsCryptoSymbolSupported(ctx context.Context, symbol string) (bool, error) {
+	cryptoAssetsCache.RLock()
+	if len(cryptoAssetsCache.Assets) > 0 && time.Now().Before(cryptoAssetsCache.ExpiresAt) {
+		for _, asset := range cryptoAssetsCache.Assets {
+			if asset.Symbol == symbol && asset.Tradable {
+				cryptoAssetsCache.RUnlock()
+				return true, nil
+			}
+		}
+		cryptoAssetsCache.RUnlock()
+	} else {
+		cryptoAssetsCache.RUnlock()
+	}
+
+	assets, err := c.GetCryptoAssets(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	cryptoAssetsCache.Lock()
+	cryptoAssetsCache.Assets = assets
+	cryptoAssetsCache.ExpiresAt = time.Now().Add(5 * time.Minute)
+	cryptoAssetsCache.Unlock()
+
+	for _, asset := range assets {
+		if asset.Symbol == symbol && asset.Tradable {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // ConvertSymbolToAlpacaFormat converts standard crypto symbol to Alpaca format
